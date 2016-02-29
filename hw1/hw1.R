@@ -1,46 +1,36 @@
 library(fields)
 
-source("./pvpow.R")
+source("./exp.R")
 
-library(parallel)
+draw <- function(pv_m, pw_m, x, y) {
+  N <- length(x)
+  M <- length(y)
+  
+  grid    <- expand.grid(x=x, y=y)
+  x.grid <- matrix(grid$x, nrow=N, ncol=M)
+  y.grid <- matrix(grid$y, nrow=N, ncol=M)
+  
+  par(mfrow=c(1,2))
+  image.plot(y.grid, x.grid, pv_m, 
+             col = colorRampPalette(c("blue", "cyan", "yellow", "red"))(1024), 
+             main="Fisher Test p-values", xlab=expression(p), ylab=expression(sigma))
+  
+  image.plot(y.grid, x.grid, pw_m, 
+             col = colorRampPalette(c("blue", "cyan", "yellow", "red"))(1024), 
+             main="Fisher Test power", xlab=expression(p), ylab=expression(sigma))
+}
 
-no_cores <- detectCores()
-cl <- makeCluster(no_cores)
+
+iterations = 2
 
 sigma1 = 1
 sigma2 = seq(from = 0.5, to = 2, by = 0.01)
 p1 = p2 = seq(from = 0, to = 1, by = 0.01)
 n1 = n2 = 50
 
-N <- length(sigma2)
-M <- length(p1)
+result <- experiment(n1, n2, p1, p2, sigma1, sigma2, iterations)
 
-PV_M  <- rep(0, N * M)
-PW_M  <- rep(0, N * M)
+PV_M <- result[[1]]
+PW_M <- result[[2]]
 
-exps <- 1000
-
-for(i in 1:exps)  # for each row
-{
-  print(i)
-  ans <- pvpow(cl, n1, n2, p1, p2, sigma1, sigma2)
-  PV_M <- PV_M + ans[[1]]
-  PW_M <- PW_M + ans[[2]]
-}
-
-PV_M <- PV_M/exps
-PW_M <- PW_M/exps
-
-
-grid    <- expand.grid(x=sigma2, y=p1)
-sigma2.matr <- matrix(grid$x, nrow=N, ncol=M)
-p.matr <- matrix(grid$y, nrow=N, ncol=M)
-
-par(mfrow=c(1,2))
-image.plot(p.matr, sigma2.matr, PV_M, 
-           col = colorRampPalette(c("blue", "cyan", "yellow", "red"))(1024), 
-           main="Fisher Test p-values", xlab=expression(p), ylab=expression(sigma))
-
-image.plot(p.matr, sigma2.matr, PW_M, 
-           col = colorRampPalette(c("blue", "cyan", "yellow", "red"))(1024), 
-           main="Fisher Test power", xlab=expression(p), ylab=expression(sigma))
+draw(PV_M, PW_M, sigma2, p1)
