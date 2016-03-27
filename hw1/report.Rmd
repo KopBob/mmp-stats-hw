@@ -120,7 +120,7 @@ drawExp <- function(m, x, y, title) {
   
   image.plot(y.grid, x.grid, m, 
              col = colorRampPalette(c("blue", "cyan", "yellow", "red"))(1024), 
-             main=title, xlab=expression(p), ylab=expression(sigma))
+             main=title, xlab=expression("p"), ylab=expression("sigma_{2}"))
 }
 ```
 
