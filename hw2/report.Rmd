@@ -1,0 +1,321 @@
+---
+title: "Годовой заработок"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Опрос US Bureau of Labor Statistics 2002 года содержит данные о годовом заработке 55729 участников; известны также их пол, возраст, уровень образования, тип работы.
+Задание: оценить влияние образования, пола и типа работы на годовой заработок.
+
+### Подготовка данных
+```{r eval=FALSE}
+library(gdata)
+data <- read.xls("./workers.xls", )
+data$SEX <- factor(data$SEX, labels = c("male", "female"))
+data$JOB <- factor(data$JOB, labels = c("private-sector", "government", "self-employed"))
+data$EDUC <- factor(data$EDUC)
+
+workers = data[c("EARN", "SEX", "AGE", "EDUC", "JOB")]
+save(workers,file="workers.Rda")
+```
+
+```{r message=F, warning=F}
+library(DescTools)
+library(clinfun)
+library(agricolae)
+library(multcomp)
+
+load("./workers.Rda")
+str(workers)
+```
+
+```{r}
+replications(EARN ~ EDUC + SEX + JOB, workers)
+```
+
+### Распределение годового дохода
+```{r}
+
+hist(workers$EARN, nclass=1000)
+
+plot(density(workers$EARN))
+lines(density(workers$EARN[workers$SEX == "female"]), col="red")
+lines(density(workers$EARN[workers$SEX == "male"]), col="blue")
+legend("topright", c("Total", "Female", "Male"), lty=c(1,1), col=c("black", "red", "blue"))
+```
+
+**Из графика плотности годового дохода видно, что основная доля участников опроса находится до порога в 1e05.**
+
+Далее будем исследовать только основную часть участников.
+```{r}
+data <- workers[workers$EARN < 1e05,]
+plot(density(data$EARN))
+lines(density(data$EARN[data$SEX == "female"]), col="red")
+lines(density(data$EARN[data$SEX == "male"]), col="blue")
+legend("topright", c("Total", "Female", "Male"), lty=c(1,1), col=c("black", "red", "blue"))
+```
+
+### Трёхфакторный дисперсионный анализ.
+**(дизайн 2х6х3)**
+
+```{r fig.height=5, fig.width=10}
+a1 <- aov(EARN ~ EDUC * SEX * JOB, data=data)
+summary(a1)
+```
+Тройное взаимодействие значимо, разделим выборку по признаку SEX.
+
+#### Анализ участников мужского пола.
+
+```{r fig.height=5, fig.width=10}
+maledata <- data[data$SEX == "male",]
+
+a1 <- aov(EARN ~ EDUC * JOB, data=maledata)
+summary(a1)
+
+par(mfrow=c(1,2))
+with(maledata, interaction.plot(JOB, EDUC, EARN, main = "Male"))
+with(maledata, interaction.plot(EDUC, JOB, EARN,main = "Male"))
+```
+Двойное взаимодействие значимо, разделим выборку по признаку JOB.
+
+#### Анализ типов работы участников мужского пола.
+
+**Private-sector**
+```{r fig.height=5, fig.width=20, warning=F}
+prmaledata <- maledata[maledata$JOB == "private-sector",]
+boxplot(EARN ~ EDUC, data=prmaledata)
+jonckheere.test(prmaledata$EARN, as.numeric(prmaledata$EDUC), alternative = "increasing")
+```
+Уровень годового дохада растет в зависимости от образования.
+
+**Government**
+```{r fig.height=5, fig.width=20, warning=F}
+gvmaledata <- maledata[maledata$JOB == "government",]
+boxplot(EARN ~ EDUC, data=gvmaledata)
+jonckheere.test(gvmaledata$EARN, as.numeric(gvmaledata$EDUC), alternative = "increasing")
+```
+
+**self-employed**
+```{r fig.height=5, fig.width=20, warning=F}
+semaledata <- maledata[maledata$JOB == "self-employed",]
+boxplot(EARN ~ EDUC, data=semaledata)
+jonckheere.test(semaledata$EARN, as.numeric(semaledata$EDUC), alternative = "increasing")
+```
+Сравним годовой доход 
+```{r fig.height=5, fig.width=20, warning=F}
+a1 <- aov(EARN ~ EDUC, data=semaledata)
+LSD2 <- LSD.test(a1, "EDUC", p.adj="bonferroni",console=TRUE)
+TukeyHSD(a1, "EDUC", p.adj="bonferroni")
+```
+Вывод: В отличие от остальных типов работ, в self-employed участники мужского пола с образованием "no high school" и "some high school", "high school diploma" и "some college" имеют схожий уровень годового дохода.
+
+#### Анализ образования участников мужского пола.
+
+**1 no high school**
+```{r fig.height=5, fig.width=20}
+edu1maledata <- maledata[maledata$EDUC == "1",]
+boxplot(EARN ~ JOB, data=edu1maledata)
+a1 <- aov(EARN ~ JOB, data=edu1maledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**2 some high school**
+```{r fig.height=5, fig.width=20}
+edu2maledata <- maledata[maledata$EDUC == "2",]
+boxplot(EARN ~ JOB, data=edu2maledata)
+a1 <- aov(EARN ~ JOB, data=edu2maledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**3 high school diploma**
+```{r fig.height=5, fig.width=20}
+edu3maledata <- maledata[maledata$EDUC == "3",]
+boxplot(EARN ~ JOB, data=edu3maledata)
+a1 <- aov(EARN ~ JOB, data=edu3maledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**4 some college**
+```{r fig.height=5, fig.width=20}
+edu4maledata <- maledata[maledata$EDUC == "4",]
+boxplot(EARN ~ JOB, data=edu4maledata)
+a1 <- aov(EARN ~ JOB, data=edu4maledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**5 bachelor's degree**
+```{r fig.height=5, fig.width=20}
+edu5maledata <- maledata[maledata$EDUC == "5",]
+boxplot(EARN ~ JOB, data=edu5maledata)
+a1 <- aov(EARN ~ JOB, data=edu5maledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**postgraduate degree**
+```{r fig.height=5, fig.width=20}
+edu6maledata <- maledata[maledata$EDUC == "6",]
+boxplot(EARN ~ JOB, data=edu6maledata)
+a1 <- aov(EARN ~ JOB, data=edu6maledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+* В группах "no high school" "some high school" отклонение дохода находится в интервале -1000, 1000. Годовой уровень - 23к.
+* В группе "high school diploma" доход у "government"(35к) в среднем выше на 2500.
+* В группе "some college" доход во всех категориях образования разный. Самый низкий у self-employed(35к) самый высокий у government(40к).
+* В группе "bachelor's degree" самый высокий доход в private-sector(48к) самый низкий у self-employed(42к)
+* В группе "postgraduate degree" самый высокий доход их всех групп. private-sector(55к)     government(53к)  self-employed(50к)
+
+
+#### Анализ участников женского пола.
+
+```{r fig.height=5, fig.width=10}
+femaledata <- data[data$SEX == "female",]
+
+a1 <- aov(EARN ~ EDUC * JOB, data=femaledata)
+summary(a1)
+
+par(mfrow=c(1,2))
+with(femaledata, interaction.plot(JOB, EDUC, EARN, main = "Female"))
+with(femaledata, interaction.plot(EDUC, JOB, EARN,main = "Female"))
+```
+Двойное взаимодействие значимо, разделим выборку по признаку JOB.
+
+#### Анализ типов работы участников мужского пола.
+
+**Private-sector**
+```{r fig.height=5, fig.width=20, warning=F}
+prfemaledata <- femaledata[femaledata$JOB == "private-sector",]
+boxplot(EARN ~ EDUC, data=prfemaledata)
+jonckheere.test(prfemaledata$EARN, as.numeric(prfemaledata$EDUC), alternative = "increasing")
+```
+Уровень годового дохада растет в зависимости от образования.
+
+**Government**
+```{r fig.height=5, fig.width=20, warning=F}
+gvfemaledata <- femaledata[femaledata$JOB == "government",]
+boxplot(EARN ~ EDUC, data=gvfemaledata)
+jonckheere.test(gvfemaledata$EARN, as.numeric(gvfemaledata$EDUC), alternative = "increasing")
+```
+
+**self-employed**
+```{r fig.height=5, fig.width=20, warning=F}
+sefemaledata <- femaledata[femaledata$JOB == "self-employed",]
+boxplot(EARN ~ EDUC, data=sefemaledata)
+jonckheere.test(sefemaledata$EARN, as.numeric(sefemaledata$EDUC), alternative = "increasing")
+```
+Сравним годовой доход 
+```{r fig.height=5, fig.width=20, warning=F}
+a1 <- aov(EARN ~ EDUC, data=sefemaledata)
+LSD2 <- LSD.test(a1, "EDUC", p.adj="bonferroni",console=TRUE)
+TukeyHSD(a1, "EDUC", p.adj="bonferroni")
+model.tables(a1, "means")$tables$EDUC
+```
+Вывод: Участники женского пола с образованием
+
+* "no high school", "some high school" - 13-15к
+* "high school diploma", "some college" - 19-22к
+* "bachelor's degree", "postgraduate degree" - 28-31к
+
+#### Анализ образования участников мужского пола.
+
+**1 no high school**
+```{r fig.height=5, fig.width=20}
+edu1femaledata <- femaledata[femaledata$EDUC == "1",]
+boxplot(EARN ~ JOB, data=edu1femaledata)
+a1 <- aov(EARN ~ JOB, data=edu1femaledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**2 some high school**
+```{r fig.height=5, fig.width=20}
+edu2femaledata <- femaledata[femaledata$EDUC == "2",]
+boxplot(EARN ~ JOB, data=edu2femaledata)
+a1 <- aov(EARN ~ JOB, data=edu2femaledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**3 high school diploma**
+```{r fig.height=5, fig.width=20}
+edu3femaledata <- femaledata[femaledata$EDUC == "3",]
+boxplot(EARN ~ JOB, data=edu3femaledata)
+a1 <- aov(EARN ~ JOB, data=edu3femaledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**4 some college**
+```{r fig.height=5, fig.width=20}
+edu4femaledata <- femaledata[femaledata$EDUC == "4",]
+boxplot(EARN ~ JOB, data=edu4femaledata)
+a1 <- aov(EARN ~ JOB, data=edu4femaledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**5 bachelor's degree**
+```{r fig.height=5, fig.width=20}
+edu5femaledata <- femaledata[femaledata$EDUC == "5",]
+boxplot(EARN ~ JOB, data=edu5femaledata)
+a1 <- aov(EARN ~ JOB, data=edu5femaledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+**postgraduate degree**
+```{r fig.height=5, fig.width=20}
+edu6femaledata <- femaledata[femaledata$EDUC == "6",]
+boxplot(EARN ~ JOB, data=edu6femaledata)
+a1 <- aov(EARN ~ JOB, data=edu6femaledata)
+TukeyHSD(a1, "JOB", p.adj="bonferroni")
+model.tables(a1, "means")$tables$JOB
+```
+
+Женский пол:
+
+* В группах "no high school" "some high school" отклонение дохода находится в интервале -1000, 1000. Годовой уровень - 14к.
+* В группе "high school diploma" 20к +-1к
+* В группе "some college" средний доход - 24к,(+-3к)
+* В группе "bachelor's degree" большой разброс, минимальный доход у женщин в self-emloyed(28к), максимальный в private-sector(35к), government(32к)
+* В группе "postgraduate degree" большой разброс, минимальный доход у женщин в self-emloyed(31к), максимальный в government(45к), private-sector(43к)
+
+
+Мужской пол:
+
+*  В группах "no high school" "some high school" отклонение дохода находится в интервале -1000, 1000. Годовой уровень - 23к.
+* В группе "high school diploma" доход у "government"(35к) в среднем выше на 2500.
+* В группе "some college" доход во всех категориях образования разный. Самый низкий у self-employed(35к) самый высокий у government(40к).
+* В группе "bachelor's degree" самый высокий доход в private-sector(48к) самый низкий у self-employed(42к)
+* В группе "postgraduate degree" самый высокий доход их всех групп. private-sector(55к)     government(53к)  self-employed(50к)
+
+# Выводы
+
+SEX:
+
+* Доход участников женского пола ниже дохода участников мужского пола во всех категориях образования и типах работ.
+    + "no high school" "some high school" -9к
+    + "high school diploma" -14к
+    +  "some college" -10к
+    +  "bachelor's degree" -14к
+    +  "postgraduate degree" -10к
+* Годовой доход участников женского пола с типом работы self-employed и образованием postgraduate degree отличается от схожих участников мужского пола на -20к.
+
+EDUC:
+
+* Чем выше уровень образования участника, тем выше его годовой доход, вне зависимости от пола и типа работы.
+* "no high school" "some high school" можно объеденить в одну группу.
+
+JOB:
+
+* Участники женского пола с типом работы "self-employed" и с образованием начиная с "bachelor's degree" имеют самый низкий доход среди всех остальных типов работ, 28к 31к соответственно.
+* Участники мужского пола с типом работы "self-employed" и с образованием начиная с "bachelor's degree" имеют самый высокий доход среди всех остальных типов работ, 48к 55к соответственно.
