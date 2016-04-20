@@ -12,3 +12,450 @@ knitr::opts_chunk$set(echo = TRUE)
 Имеются результаты обзвона 4119 клиентов португальского банка, которым предлагалось завести депозит. Известны социально-демографические характеристики клиентов, история предыдущих коммуникаций, социально-экономические показатели на момент совершения звонка. (deposit.xlsx)
 
 **Задание**: Какие признаки определяют готовность клиента открыть депозит по результатам обзвона?
+
+
+- визуализация данных, анализ распределения признаков (оценка необходимости трансформации), оценка наличия выбросов;
+
+- оценка необходимости преобразования отклика и его поиск методом Бокса-Кокса;
+визуальный анализ остатков;
+
+- проверка гипотез об остатках: нормальность, несмещённость, гомоскедастичность;
+
+- отбор признаков с учётом множественной проверки гипотез и возможной гетероскедастичности;
+
+- анализ необходимости добавления взаимодействий и квадратов признаков;
+
+- расчёт расстояний Кука, возможное удаление выбросов, обновление модели;
+
+- визуализация данных, оценка наличия выбросов, анализ таблиц сопряжённости по категориальным признакам;
+
+- содержательный отбор признаков: выбор наилучшей линейной модели, оценка линейности непрерывных признаков по логиту, анализ необходимости добавления взаимодействий, проверка адекватности финальной модели (анализ влиятельных наблюдений, классификация);
+
+- выводы.
+
+Input variables:
+   # bank client data:
+   1 - age (numeric)
+   2 - job : type of job (categorical:
+      "admin.",
+      "blue-collar",
+      "entrepreneur",
+      "housemaid",
+      "management",
+      "retired",
+      "self-employed",
+      "services",
+      "student",
+      "technician",
+      "unemployed",
+      "unknown")
+   3 - marital : marital status (categorical:
+      "divorced",
+      "married",
+      "single",
+      "unknown"; note: "divorced" means divorced or widowed)
+   4 - education (categorical:
+      "basic.4y",
+      "basic.6y",
+      "basic.9y",
+      "high.school",
+      "illiterate",
+      "professional.course",
+      "university.degree",
+      "unknown")
+   5 - default: has credit in default? (categorical: "no","yes","unknown")
+   6 - housing: has housing loan? (categorical: "no","yes","unknown")
+   7 - loan: has personal loan? (categorical: "no","yes","unknown")
+
+   # related with the last contact of the current campaign:
+   8 - contact: contact communication type (categorical: "cellular","telephone") 
+   9 - month: last contact month of year (categorical: "jan", "feb", "mar", ..., "nov", "dec")
+  10 - day_of_week: last contact day of the week (categorical: "mon","tue","wed","thu","fri")
+  11 - duration: last contact duration, in seconds (numeric).
+      Important note:  this attribute highly affects the output target (e.g., if duration=0 then y="no"). Yet, the duration is not known before a call is performed. Also, after the end of the call y is obviously known. Thus, this input should only be included for benchmark purposes and should be discarded if the intention is to have a realistic predictive model.
+   # other attributes:
+  12 - campaign: number of contacts performed during this campaign and for this client (numeric, includes last contact)
+  13 - pdays: number of days that passed by after the client was last contacted from a previous campaign (numeric; 999 means client was not previously contacted)
+  14 - previous: number of contacts performed before this campaign and for this client (numeric)
+  15 - poutcome: outcome of the previous marketing campaign (categorical: "failure","nonexistent","success")
+  
+   # social and economic context attributes
+  16 - emp.var.rate: employment variation rate - quarterly indicator (numeric)
+  17 - cons.price.idx: consumer price index - monthly indicator (numeric)     
+  18 - cons.conf.idx: consumer confidence index - monthly indicator (numeric)     
+  19 - euribor3m: euribor 3 month rate - daily indicator (numeric)
+  20 - nr.employed: number of employees - quarterly indicator (numeric)
+
+  Output variable (desired target):
+  21 - y - has the client subscribed a term deposit? (binary: "yes","no")
+  
+```{r}
+factor_cols <- c("y", "job", "marital", "education", "default", "housing", "loan", "day_of_week", "month", "contact", "poutcome")
+
+numeric_cols <- c("age", "campaign", "duration", "pdays", "previous", "emp.var.rate", "cons.price.idx", "cons.conf.idx", "euribor3m", "nr.employed")
+
+data <- read.csv("./deposit.csv", header = TRUE, sep = ";")
+
+for (col in factor_cols) {
+  data[[col]] <- as.factor(data[[col]])
+}
+
+for (col in numeric_cols) {
+  data[[col]] <- as.numeric(data[[col]])
+}
+
+raw_data <- data
+colnames(data)
+```
+
+#### Обработаем пропуски
+
+```{r}
+
+cols_with_unknow <- c("job", "marital", "education", "default", "housing", "loan")
+for (col in cols_with_unknow) {
+  levels(data[[col]])[levels(data[[col]])=="unknown"] <- NA
+  data[[col]] <- droplevels(data[[col]])
+}
+
+na_data <- data[!complete.cases(data),]
+print(c(nrow(na_data), nrow(data)))
+Filter(function(x) { x > 0}, sapply(na_data, function(x) {sum(is.na(x))}))
+```
+Признак default неинформативен: 1 из 3316 записей имеет кредит по умолчанию, по 803 информация неизвестна, удалим его.
+```{r}
+data$default <- NULL
+ftable(data$job, data$y, exclude = c())
+ftable(data$marital, data$y, exclude = c())
+ftable(data$education, data$y, exclude = c())
+ftable(data$housing, data$y, exclude = c())
+ftable(data$loan, data$y, exclude = c())
+all((raw_data$housing == "unknown") == (raw_data$loan == "unknown"))
+sum(raw_data$loan == "unknown")
+
+```
+По illiterate признака education только одна запись, удалим ее. (1 запись)
+По признакам housing и loan значение unknown совпадает у всех записей Есть смысл их удалить. (105 записей)
+```{r}
+
+data <- data[(data$education != "illiterate" | is.na(data$education)),]
+data$education <- droplevels(data$education)
+
+data <- data[(!is.na(data$loan)),]
+data$housing <- droplevels(data$housing)
+data$loan <- droplevels(data$loan)
+
+ftable(data$job, data$y, exclude = c())
+ftable(data$marital, data$y, exclude = c())
+ftable(data$education, data$y, exclude = c())
+ftable(data$housing, data$y, exclude = c())
+ftable(data$loan, data$y, exclude = c())
+```
+Удалили
+Осталось разобраться с job 35, 4
+Осталось разобраться с marital 10, 1
+Осталось разобраться с job 140, 26
+
+```{r}
+na_data <- data[!complete.cases(data),]
+ftable(na_data$y, exclude = c())
+```
+Удалим все пропущенные строки
+```{r}
+data <- data[complete.cases(data),]
+nrow(raw_data) - nrow(data)
+nrow(data)
+ftable(data$y)
+```
+В итоге удалено 309 строк. Осталось 3810
+
+job, marital, education, default, housing, loan
+
+```{r}
+library("ggplot2")
+names(data)
+
+ftable(data$y, data$contact)
+ftable(data$y, data$month)
+ftable(data$y, data$day_of_week)
+
+ggplot(data, aes(duration)) + geom_histogram(bins = 100)
+
+ggplot(data, aes(campaign)) + geom_histogram(bins = 100)
+
+ggplot(data, aes(pdays)) + geom_histogram(bins = 100)
+
+# pdays: number of days that passed by after the client was last
+# contacted from a previous campaign
+# (numeric; 999 means client was not previously contacted)
+ftable(data$y, data$pdays) # to binary, 0 - wasn't , 1 - was.
+
+# previous: number of contacts performed before
+# this campaign and for this client (numeric)
+ftable(data$y, data$previous)
+
+# poutcome: outcome of the previous marketing campaign
+# (categorical: "failure","nonexistent","success")
+ftable(data$y, data$poutcome)
+
+ftable(data$y, data$campaign)
+```
+Превратим pdays в бинарный признак, 0 - последний контакт был совершен в течении последнего месяца.
+
+```{r}
+data$was_contacted <- data$pdays != 999
+ftable(data$y, data$was_contacted)
+data$pdays <- NULL
+```
+
+```{r}
+p10 <- ggplot(data, aes(emp.var.rate, y)) + geom_point()
+p11 <- ggplot(data, aes(emp.var.rate, fill = y)) + geom_histogram()
+
+p20 <- ggplot(data, aes(cons.price.idx, y)) + geom_point()
+p21 <- ggplot(data, aes(cons.price.idx, fill = y)) + geom_histogram()
+
+p30 <- ggplot(data, aes(cons.conf.idx, y)) + geom_point()
+p31 <- ggplot(data, aes(cons.conf.idx, fill = y)) + geom_histogram()
+
+p40 <- ggplot(data, aes(euribor3m, y)) + geom_point()
+p51 <- ggplot(data, aes(euribor3m, fill = y)) + geom_histogram()
+
+p50 <- ggplot(data, aes(nr.employed, y)) + geom_point()
+p51 <- ggplot(data, aes(nr.employed, fill = y)) + geom_histogram(bins = 100)
+
+p60 <- ggplot(data, aes(age, y)) + geom_point()
+p61 <- ggplot(data, aes(age, fill = y)) + geom_histogram(bins = 100)
+
+p70 <- ggplot(data, aes(campaign, y)) + geom_point()
+p71 <- ggplot(data, aes(campaign, fill = y)) + geom_histogram(bins = 100)
+
+p80 <- ggplot(data, aes(duration, y)) + geom_point()
+p81 <- ggplot(data, aes(duration, fill = y)) + geom_histogram(bins = 100)
+
+p90 <- ggplot(data, aes(previous, y)) + geom_point()
+p91 <- ggplot(data, aes(previous, fill = y)) + geom_histogram(bins = 100)
+
+multiplot(p01, p11, p21, p31, p41, p51, cols = 2)
+multiplot(p61, p71, p81, p91, cols = 2)
+```
+Ничего хорошо по Numric признакам не видно.
+
+Для предварительного отбора признаков построим одномерные модели по каждому фактору и оценим их значимость:
+```{r}
+m0 <- glm(y ~ 1, family=binomial(), data=data)
+add1(m0, scope = as.formula(paste("~", paste(setdiff(names(data), c("y")), collapse= " + "))), test="LRT")
+```
+В порог 0.25 по значимости не прошли housing, loan, day_of_week.
+
+Построим по оставшимся модель 1
+
+## Модель 1
+```{r}
+m0_eliminated <- c("y", "housing", "loan", "day_of_week")
+paste(setdiff(names(data), m0_eliminated), collapse = ' + ') 
+
+m1 <- glm(y ~ age + job + marital + education + contact + month + duration + campaign + previous + poutcome + emp.var.rate + cons.price.idx + cons.conf.idx + euribor3m + nr.employed + was_contacted, family=binomial(), data=data)
+summary(m1)
+```
+Категориальный предиктор, кодируемый несколькими фиктивными переменными, необходимо включать или исключать целиком. Значимость соответствующих фиктивных переменных проверяется в совокупности с помощью критерия отношения правдоподобия. В случае, когда по отдельности какие-то фиктивные переменные не значимы, допустимо объединять уровни категориального предиктора, основываясь на интерпретации.
+
+Незначимые признаки age, job, marital, education, previous, emp.var.rate, cons.conf.idx, euribor3m, was_contacted
+
+Раздел их на две группы:
+
+- job, education, previous, was_contacted
+- age, marital, emp.var.rate, cons.conf.idx, euribor3m
+
+```{r}
+m1_eliminated <- c("age", "job", "marital", "education", "previous", "emp.var.rate", "cons.conf.idx", "euribor3m", "was_contacted")
+m1_eliminated_g0 <- c("job", "education", "previous", "was_contacted")
+m1_eliminated_g1 <- c("age", "marital", "emp.var.rate", "cons.conf.idx", "euribor3m")
+```
+
+Критерий отношения правдоподобия считает такую модель существенно лучшей константы:
+```{r, echo=TRUE, warning=FALSE}
+library(lmtest)
+lrtest(m0, m1)
+```
+
+
+## Модель 2
+Новая модель без незначимых признаков:
+```{r}
+paste(setdiff(names(data), c(m0_eliminated, m1_eliminated)), collapse = ' + ') 
+m2 <- glm(y ~ contact + month + duration + campaign + poutcome + cons.price.idx + nr.employed,
+          family=binomial(),
+          data=data)
+summary(m2)
+lrtest(m1, m2)
+```
+По критерию отношения правдоподобия ухудшения не произошло.
+
+Добавляем по одному незначимые признаки
+```{r}
+m1_eliminated
+summary(glm(y ~ contact + month + duration + campaign + poutcome + cons.price.idx + nr.employed + cons.conf.idx, family=binomial(), data=data))
+```
+Только cons.conf.idx стал значимым(0.06734) при отборе, добавим его в модель
+
+## Модель 3
+```{r}
+m3 <- glm(y ~ contact + month + duration + campaign + poutcome + cons.price.idx + nr.employed + cons.conf.idx,
+          family=binomial(),
+          data=data)
+summary(m3)
+lrtest(m2, m3)
+```
+По критерию отношения правдоподобия ухудшения не произошло.
+
+```{r}
+par(mfrow=c(3,3))
+for (fact in c("duration", "campaign", "cons.price.idx", "nr.employed", "cons.conf.idx")) {
+  lw <- ksmooth(data[[fact]], 1 * (data$y == "yes"), kernel = "normal", bandwidth=sd(data[[fact]]))
+  lsm <- log(lw$y / (1-lw$y))
+  plot(lw$x, lsm, type="l", xlab=fact, ylab ="Log-odds",col="red", lwd=2)
+}
+```
+
+По некоторым признакам логит существенно нелинеен. Попробуем подобрать дробные полиномы для непрерывных признаков:
+```{r, warning=FALSE, echo=TRUE, cache=TRUE}
+library(mfp)
+mfp(y ~ contact + month + poutcome + fp(duration) + fp(campaign) + fp(cons.price.idx) + fp(nr.employed) + fp(cons.conf.idx), family = binomial, data=data)
+```
+ничего хорошо не подобралось.
+
+Добавим межфакторные взаимодейсвия
+
+```{r, echo=TRUE, warning=FALSE, cache=TRUE}
+add1(m3, scope= ~ .^2, test="LRT")
+```
+Добавим duration:cons.price.idx + month:duration
+
+```{r}
+m4 <- glm(y ~ contact + month + duration + campaign + poutcome + cons.price.idx + nr.employed + cons.conf.idx + duration:cons.price.idx + month:duration,
+          family=binomial(),
+          data=data)
+summary(m4)
+lrtest(m3, m4)
+```
+По критерию отношения правдоподобия получается ухудшение, не будем добавлять межфакторные взаимодействия.
+
+Остановимся на модели 3
+
+## Модель 5
+Попробуем удалить влиятельные наблюдения:
+```{r, echo=TRUE}
+phat <- predict(m3, type="response")
+
+par(mfrow=c(1,1))
+plot(phat, cooks.distance(m3), pch=20, xlab=expression(hat(pi)(x[i])), ylab="Cook's distance")
+lines(c(0,1), c(0.15,0.15), col="red", lwd=2)
+
+data2 <- data[cooks.distance(m3)<0.015,]
+m5  <- glm(y ~ contact + month + duration + campaign + poutcome + cons.price.idx + nr.employed + cons.conf.idx, family=binomial(), data=data2)
+summary(m5)
+```
+
+Сравнить полученные коэффициенты с коэффициентами модели, настроенной по полным данным:
+```{r, echo=TRUE}
+res <- cbind(coefficients(m3), coefficients(m5))
+colnames(res) <- c("All data", "Filtered data")
+res
+```
+
+#### Итог
+Посмотрим на качество классификации:
+```{r, echo=TRUE, fig.height=5.5, fig.width=10}
+library(AUC)
+par(mfrow=c(1,2))
+phat <- predict(m5, type="response")
+
+sens <- sensitivity(phat, factor(1 * (data$y == "yes")))
+plot(sens, col="red")
+spec <- specificity(phat, factor(1 * (data$y == "yes")))
+lines(spec$cutoffs, spec$measure, col="blue", ylab="")
+grid()
+legend("bottom", c("sensitivity", "specificity"), lty=c(1,1), col=c("red", "blue"))
+
+r <- roc(phat, factor(1 * (data$y == "yes")))
+plot(r)
+
+auc(r)
+lrtest(m3,m0)$"Pr(>Chisq)"[2]
+```
+Порог 0.5. площадь под ROC-кривой составляет `r auc(r)`. 
+Значимость модели по критерию отношения правдоподобия равна `r lrtest(m6,m0)$"Pr(>Chisq)"[2]`.
+
+Приросты отношений шансов на патологию для каждого признака и доверительные интервалы для них:
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+summary(m5)
+exp(coefficients(m5))[-1]
+exp(confint(m5))[-1,]
+
+round(1 / exp(coefficients(m5))["nr.employed"], 2)
+
+round(1 / exp(confint(m5))["nr.employed",c(2,1)], 2)
+```
+
+Расшифровки обозначений для признаков в финальной модели:
+
+contact: contact communication type (categorical: "cellular","telephone")
+month: last contact month of year (categorical: "jan", "feb", "mar", ..., "nov", "dec")
+duration: last contact duration, in seconds (numeric).
+campaign: number of contacts performed during this campaign and for this client (numeric, includes last contact)
+poutcome: outcome of the previous marketing campaign (categorical: "failure","nonexistent","success")
+cons.price.idx: consumer price index - monthly indicator (numeric)
+cons.conf.idx: consumer confidence index - monthly indicator (numeric)
+nr.employed: number of employees - quarterly indicator (numeric)  
+
+
+
+
+```{r}
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
