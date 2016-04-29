@@ -7,6 +7,55 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+```{r}
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
 ## ДЗ 3
 
 Имеются результаты обзвона 4119 клиентов португальского банка, которым предлагалось завести депозит. Известны социально-демографические характеристики клиентов, история предыдущих коммуникаций, социально-экономические показатели на момент совершения звонка. (deposit.xlsx)
@@ -108,8 +157,10 @@ raw_data <- data
 colnames(data)
 ```
 
-#### Обработаем пропуски
+# Data preparation
 
+
+## Categorical
 ```{r}
 
 cols_with_unknow <- c("job", "marital", "education", "default", "housing", "loan")
@@ -121,6 +172,7 @@ for (col in cols_with_unknow) {
 na_data <- data[!complete.cases(data),]
 print(c(nrow(na_data), nrow(data)))
 Filter(function(x) { x > 0}, sapply(na_data, function(x) {sum(is.na(x))}))
+ftable(data$default, data$y, exclude = c())
 ```
 Признак default неинформативен: 1 из 3316 записей имеет кредит по умолчанию, по 803 информация неизвестна, удалим его.
 ```{r}
@@ -135,7 +187,8 @@ sum(raw_data$loan == "unknown")
 
 ```
 По illiterate признака education только одна запись, удалим ее. (1 запись)
-По признакам housing и loan значение unknown совпадает у всех записей Есть смысл их удалить. (105 записей)
+По признакам housing и loan значение unknown совпадает у всех записей.
+
 ```{r}
 
 data <- data[(data$education != "illiterate" | is.na(data$education)),]
@@ -146,21 +199,19 @@ data$housing <- droplevels(data$housing)
 data$loan <- droplevels(data$loan)
 
 ftable(data$job, data$y, exclude = c())
-ftable(data$marital, data$y, exclude = c())
-ftable(data$education, data$y, exclude = c())
-ftable(data$housing, data$y, exclude = c())
-ftable(data$loan, data$y, exclude = c())
+
+
+# Осталось разобраться с job 35, 4
+# Осталось разобраться с marital 10, 1
+# Осталось разобраться с job 140, 26
 ```
-Удалили
-Осталось разобраться с job 35, 4
-Осталось разобраться с marital 10, 1
-Осталось разобраться с job 140, 26
 
 ```{r}
 na_data <- data[!complete.cases(data),]
 ftable(na_data$y, exclude = c())
 ```
-Удалим все пропущенные строки
+
+Удалим строки, содержащие пропуски (complete cases).
 ```{r}
 data <- data[complete.cases(data),]
 nrow(raw_data) - nrow(data)
@@ -208,6 +259,7 @@ ftable(data$y, data$was_contacted)
 data$pdays <- NULL
 ```
 
+## Numeric
 ```{r}
 p10 <- ggplot(data, aes(emp.var.rate, y)) + geom_point()
 p11 <- ggplot(data, aes(emp.var.rate, fill = y)) + geom_histogram()
@@ -219,7 +271,7 @@ p30 <- ggplot(data, aes(cons.conf.idx, y)) + geom_point()
 p31 <- ggplot(data, aes(cons.conf.idx, fill = y)) + geom_histogram()
 
 p40 <- ggplot(data, aes(euribor3m, y)) + geom_point()
-p51 <- ggplot(data, aes(euribor3m, fill = y)) + geom_histogram()
+p41 <- ggplot(data, aes(euribor3m, fill = y)) + geom_histogram()
 
 p50 <- ggplot(data, aes(nr.employed, y)) + geom_point()
 p51 <- ggplot(data, aes(nr.employed, fill = y)) + geom_histogram(bins = 100)
@@ -236,10 +288,13 @@ p81 <- ggplot(data, aes(duration, fill = y)) + geom_histogram(bins = 100)
 p90 <- ggplot(data, aes(previous, y)) + geom_point()
 p91 <- ggplot(data, aes(previous, fill = y)) + geom_histogram(bins = 100)
 
-multiplot(p01, p11, p21, p31, p41, p51, cols = 2)
+multiplot(p11, p21, p31, p41, p51, cols = 2)
 multiplot(p61, p71, p81, p91, cols = 2)
 ```
-Ничего хорошо по Numric признакам не видно.
+
+Ничего хорошо по Numeric признакам не видно.
+
+# Построение моделей
 
 Для предварительного отбора признаков построим одномерные модели по каждому фактору и оценим их значимость:
 ```{r}
@@ -247,6 +302,22 @@ m0 <- glm(y ~ 1, family=binomial(), data=data)
 add1(m0, scope = as.formula(paste("~", paste(setdiff(names(data), c("y")), collapse= " + "))), test="LRT")
 ```
 В порог 0.25 по значимости не прошли housing, loan, day_of_week.
+
+Закодируем категориальные признаки
+```{r}
+factor_cols
+
+data$marital <- relevel(data$marital, "married")
+data$poutcome <- relevel(data$poutcome, "nonexistent")
+length(levels(data$job))
+
+contrasts(data$job) = contr.sum(length(levels(data$job)))
+contrasts(data$education) = contr.sum(length(levels(data$education)))
+contrasts(data$day_of_week) = contr.sum(length(levels(data$day_of_week)))
+contrasts(data$month) = contr.sum(length(levels(data$month)))
+
+levels(data$month)
+```
 
 Построим по оставшимся модель 1
 
@@ -339,27 +410,27 @@ m4 <- glm(y ~ contact + month + duration + campaign + poutcome + cons.price.idx 
 summary(m4)
 lrtest(m3, m4)
 ```
-По критерию отношения правдоподобия получается ухудшение, не будем добавлять межфакторные взаимодействия.
+По критерию отношения правдоподобия получается улучшение, добавим межфакторные взаимодействия.
 
 Остановимся на модели 3
 
 ## Модель 5
 Попробуем удалить влиятельные наблюдения:
 ```{r, echo=TRUE}
-phat <- predict(m3, type="response")
+phat <- predict(m4, type="response")
 
 par(mfrow=c(1,1))
-plot(phat, cooks.distance(m3), pch=20, xlab=expression(hat(pi)(x[i])), ylab="Cook's distance")
+plot(phat, cooks.distance(m4), pch=20, xlab=expression(hat(pi)(x[i])), ylab="Cook's distance")
 lines(c(0,1), c(0.15,0.15), col="red", lwd=2)
 
-data2 <- data[cooks.distance(m3)<0.015,]
-m5  <- glm(y ~ contact + month + duration + campaign + poutcome + cons.price.idx + nr.employed + cons.conf.idx, family=binomial(), data=data2)
+data2 <- data[cooks.distance(m3)<0.025,]
+m5  <- glm(y ~ contact + month + duration + campaign + poutcome + cons.price.idx + nr.employed + cons.conf.idx + duration:cons.price.idx + month:duration, family=binomial(), data=data2)
 summary(m5)
 ```
 
 Сравнить полученные коэффициенты с коэффициентами модели, настроенной по полным данным:
 ```{r, echo=TRUE}
-res <- cbind(coefficients(m3), coefficients(m5))
+res <- cbind(coefficients(m4), coefficients(m5))
 colnames(res) <- c("All data", "Filtered data")
 res
 ```
@@ -384,8 +455,8 @@ plot(r)
 auc(r)
 lrtest(m3,m0)$"Pr(>Chisq)"[2]
 ```
-Порог 0.5. площадь под ROC-кривой составляет `r auc(r)`. 
-Значимость модели по критерию отношения правдоподобия равна `r lrtest(m6,m0)$"Pr(>Chisq)"[2]`.
+Порог 0.6. площадь под ROC-кривой составляет `r auc(r)`. 
+Значимость модели по критерию отношения правдоподобия равна `r lrtest(m3,m0)$"Pr(>Chisq)"[2]`.
 
 Приросты отношений шансов на патологию для каждого признака и доверительные интервалы для них:
 ```{r, echo=TRUE, message=FALSE, warning=FALSE}
@@ -393,12 +464,15 @@ summary(m5)
 exp(coefficients(m5))[-1]
 exp(confint(m5))[-1,]
 
-round(1 / exp(coefficients(m5))["nr.employed"], 2)
+levels(data$month)
 
-round(1 / exp(confint(m5))["nr.employed",c(2,1)], 2)
+round(1 / exp(coefficients(m5))["month2"], 2)
+ftable(data$month, data$y)
+
 ```
 
 Расшифровки обозначений для признаков в финальной модели:
+
 
 contact: contact communication type (categorical: "cellular","telephone")
 month: last contact month of year (categorical: "jan", "feb", "mar", ..., "nov", "dec")
@@ -410,52 +484,31 @@ cons.conf.idx: consumer confidence index - monthly indicator (numeric)
 nr.employed: number of employees - quarterly indicator (numeric)  
 
 
+Выводы:
+
+* При звонке на стационарный телефон готовность клиента взять депозит уменьшается в `r  round(1 / exp(coefficients(m5))["contacttelephone"], 2)` раз (`r round(1 / exp(confint(m5))["contacttelephone",c(2,1)], 2)`).
+
+* С увеличением на единицу числа контактов с клиентом по этой кампании готовность клиента взять депозит уменьшается в `r  round(1 / exp(coefficients(m5))["campaign"], 2)` раз (`r round(1 / exp(confint(m5))["campaign",c(2,1)], 2)`).
 
 
-```{r}
-# Multiple plot function
-#
-# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
-# - cols:   Number of columns in layout
-# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
-#
-# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
-# then plot 1 will go in the upper left, 2 will go in the upper right, and
-# 3 will go all the way across the bottom.
-#
-multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
-  library(grid)
+* Если клиент участвовал в предыдущей кампании и результат был положительный, то вероятность положительного исхода в этой кампании увеличивается в `r  round(1 / exp(coefficients(m5))["poutcomesuccess"], 2)` относительно клиентов не участвоваших в пред. кампании. А если результат был отрицательны, то уменьшается в `r  round(1 / exp(coefficients(m5))["poutcomefailure"], 2)`.
 
-  # Make a list from the ... arguments and plotlist
-  plots <- c(list(...), plotlist)
+* С увеличением на пункт индекс потребительской уверенности клиента, вероятность уменьшается в `r  round(1 / exp(coefficients(m5))["cons.conf.idx"], 2)` раз (`r round(1 / exp(confint(m5))["cons.conf.idx",c(2,1)], 2)`).
 
-  numPlots = length(plots)
+* Увеличение на единицу длительности разговора в мае, увеличивает вероятность в  `r round(exp(coefficients(m5)["duration"] + coefficients(m5)["month7:duration"]), 2)` раз (`r round(exp(confint(m5)["duration",c(1,2)] + confint(m5)["month7:duration",c(1,2)]), 2)`).
 
-  # If layout is NULL, then use 'cols' to determine layout
-  if (is.null(layout)) {
-    # Make the panel
-    # ncol: Number of columns of plots
-    # nrow: Number of rows needed, calculated from # of cols
-    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
-                    ncol = cols, nrow = ceiling(numPlots/cols))
-  }
+* Увеличение на пункт Индекса потребительских цен клиента при минимальной продолжительности разговора (`r min(data$duration)`) связано с увеличением вероятности в `r round(exp(coefficients(m5)["cons.price.idx"] + coefficients(m5)["duration:cons.price.idx"] * min(data$duration)), 2)` раз (`r round(exp(confint(m5)["cons.price.idx",c(1,2)] + confint(m5)["duration:cons.price.idx",c(1,2)] * min(data$duration)), 2)`). При этом каждое увеличение на 1 длительности разговора приводит к росту влияния ИПЦ на `r round(exp(coefficients(m5)["duration:cons.price.idx"]), 2)` (`r round(exp(confint(m5)["duration:cons.price.idx",c(1,2)]), 2)`).
 
- if (numPlots==1) {
-    print(plots[[1]])
 
-  } else {
-    # Set up the page
-    grid.newpage()
-    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+* При звонке клиенту в августе вероятность того, что он возьмет депозит уменьшается в `r  round(1 / exp(coefficients(m5))["month2"], 2)` раз (`r round(1 / exp(confint(m5))["month2",c(2,1)], 2)`) относительно звонка в другие месяца.
 
-    # Make each plot, in the correct location
-    for (i in 1:numPlots) {
-      # Get the i,j matrix positions of the regions that contain this subplot
-      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+* При звонке клиенту в июле вероятность того, что он возьмет депозит уменьшается в `r  round(1 / exp(coefficients(m5))["month4"], 2)` раз (`r round(1 / exp(confint(m5))["month4",c(2,1)], 2)`) относительно звонка в другие месяца.
 
-      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
-                                      layout.pos.col = matchidx$col))
-    }
-  }
-}
-```
+* При звонке клиенту в декабре вероятность того, что он возьмет депозит увеличится в `r  round(1 / exp(coefficients(m5))["month3"], 2)` раз (`r round(1 / exp(confint(m5))["month3",c(2,1)], 2)`) относительно звонка в другие месяца.
+
+* При звонке клиенту в июне вероятность того, что он возьмет депозит увеличится в `r  round(1 / exp(coefficients(m5))["month5"], 2)` раз (`r round(1 / exp(confint(m5))["month5",c(2,1)], 2)`) относительно звонка в другие месяца.
+
+* При звонке клиенту в марте вероятность того, что он возьмет депозит увеличится в `r  round(1 / exp(coefficients(m5))["month6"], 2)` раз (`r round(1 / exp(confint(m5))["month6",c(2,1)], 2)`) относительно звонка в другие месяца.
+
+* При звонке на стационарный телефон готовность клиента взять депозит уменьшается в `r  round(1 / exp(coefficients(m5))["contacttelephone"], 2)` раз (`r round(1 / exp(confint(m5))["contacttelephone",c(2,1)], 2)`).
+
