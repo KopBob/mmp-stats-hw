@@ -1,0 +1,278 @@
+---
+title: "report"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Временной ряд
+
+```{r}
+library(forecast)
+library(tseries)
+library(Hmisc)
+
+data <- read.csv("./Raspisanie_Russia.csv", header = TRUE, sep = ";")
+data$Average.daily <- NULL
+names(data)
+
+xname <- "Аудитория сервиса Яндекс.Расписание"
+
+data$Monthly <- as.numeric(data$Monthly)
+data$Datetime <- as.Date(as.yearmon(data$Datetime, format="%Y-%m-%d"))
+start <- as.numeric(c(format(data$Datetime[1], "%Y"), format(data$Datetime[1], "%m")))
+end <- as.numeric(c(format(tail(data$Datetime, n=1), "%Y"), format(tail(data$Datetime, n=1), "%m")))
+
+tSeries <- ts(data = data$Monthly, start = start, end = end, frequency = 12)
+
+plot(tSeries, type="l", ylab=xname, col="red")
+grid()
+```
+
+Попробуем поделить на число дней в месяце:
+```{r}
+plot(tSeries / monthDays(as.Date(time(tSeries))), type="l", ylab=xname, col="red")
+grid()
+```
+Ряд не стал более регулярным, так что вернёмся к исходным данным.
+
+STL-декомпозиция ряда:
+
+```{r}
+plot(stl(tSeries, s.window="periodic"))
+```
+
+Оптимальное преобразование Бокса-Кокса и результат его применения:
+```{r}
+par(mfrow=c(2,1))
+plot(tSeries, ylab="Original series", xlab="", col="red")
+grid()
+
+LambdaOpt <- BoxCox.lambda(tSeries)
+plot(BoxCox(tSeries, 1), ylab="Transformed series", xlab="", col="red")
+title(main=toString(round(LambdaOpt, 3)))
+grid()
+LambdaOpt <- 1
+
+```
+
+В данном случае преобразование имеет смысл использовать, так как оно хорошо стабилизирует дисперсию.
+Попробуем округлить параметр и взять $\lambda=0$:
+```{r}
+plot(BoxCox(tSeries, 0), ylab="Transformed series", xlab="", col="red")
+title(main="0")
+grid()
+```
+Результат практически такой же. Далее будем использовать $\lambda=0$.
+
+# Ручная ARIMA
+
+## Стационаризация ряда
+Исходный ряд нестационарен (p<`r kpss.test(BoxCox(tSeries, LambdaOpt))$p.value`, критерий KPSS); сделаем сезонное дифференцирование:
+```{r}
+kpss.test(BoxCox(tSeries, LambdaOpt))
+
+plot(diff(BoxCox(tSeries, LambdaOpt), 12), type="l", col="red")
+grid()
+```
+Ряд всё ещё нестационарен (p<`r kpss.test(diff(BoxCox(tSeries, LambdaOpt), 12))$p.value`, критерий KPSS). Проведём ещё одно дифференцирование:
+```{r}
+kpss.test(diff(BoxCox(tSeries, LambdaOpt), 12))
+plot(diff(diff(BoxCox(tSeries, LambdaOpt), 12), 1), type="l", col="red")
+grid()
+
+kpss.test(diff(diff(BoxCox(tSeries, LambdaOpt), 12), 1))
+```
+Для полученного ряда гипотеза стационарности не отвергается (p>`r kpss.test(diff(diff(BoxCox(tSeries, LambdaOpt), 12), 1))$p.value`)
+
+Посмотрим на ACF и PACF полученного продифференцированного ряда:
+
+```{r}
+# par(mfrow=c(2,1))
+acf(diff(diff(BoxCox(tSeries, LambdaOpt), 12), 1), lag.max=5*12, main="")
+pacf(diff(diff(BoxCox(tSeries, LambdaOpt), 12), 1), lag.max=5*12, main="")
+```
+ACF - 1, 12. PACF - 1, 12. Ищем вокруг ARIMA(1,1,1)(1,1,1)$_{12}$
+
+```{r}
+?Arima
+Arima(tSeries, order=c(1,1,1), seasonal=c(1,1,0), lambda=LambdaOpt)$aicc
+Arima(tSeries, order=c(0,1,0), seasonal=c(0,1,0), lambda=LambdaOpt)$aicc
+Arima(tSeries, order=c(1,1,0), seasonal=c(0,1,0), lambda=LambdaOpt)$aicc
+Arima(tSeries, order=c(1,1,1), seasonal=c(1,1,1), lambda=LambdaOpt)$aicc
+Arima(tSeries, order=c(1,1,2), seasonal=c(1,1,2), lambda=LambdaOpt)$aicc
+Arima(tSeries, order=c(1,1,1), seasonal=c(1,1,2), lambda=LambdaOpt)$aicc
+```
+
+Наилучшая по AICc модель — ARIMA(0,1,1)(0,1,1)$_{12}$. Посмотрим на её остатки:
+```{r}
+fit.arima.hand <- Arima(tSeries, order=c(1,1,1), seasonal=c(1,1,1), lambda=LambdaOpt)
+res <- residuals(fit.arima.hand)
+plot(res)
+```
+
+Видно, что в начале ряда остатки не определены, что логично, поскольку модель сезонная. Отрежем начало ряда остатков и проанализируем их:
+```{r}
+res <- res[-c(1:24)]
+tsdisplay(res)
+```
+
+Достигаемые уровни значимости критерия Льюнга-Бокса для остатков:
+```{r}
+p <- rep(0, 1, frequency(tSeries)*3)
+for (i in 1:length(p)){
+  p[i] <- Box.test(res, lag=i, type = "Ljung-Box")$p.value
+}
+plot(p, xlab="Lag", ylab="P-value", ylim=c(0,1))
+abline(h = 0.05, lty = 2, col = "blue")
+```
+
+Q-Q plot и гистограмма:
+```{r}
+par(mfrow=c(1,2))
+qqnorm(res)
+qqline(res, col="red")
+hist(res)
+```
+
+# Автоматическая Arima
+
+```{r}
+fit.arima.auto <- auto.arima(tSeries, lambda=LambdaOpt)
+fit.arima.auto
+```
+
+```{r}
+res <- residuals(fit.arima.auto)
+plot(res)
+```
+
+Достигаемые уровни значимости критерия Льюнга-Бокса для остатков:
+```{r}
+res <- res[-c(1:12)]
+tsdisplay(res)
+
+p <- rep(0, 1, frequency(tSeries)*3)
+for (i in 1:length(p)){
+  p[i] <- Box.test(res, lag=i, type = "Ljung-Box")$p.value
+}
+plot(p, xlab="Lag", ylab="P-value", ylim=c(0,1))
+abline(h = 0.05, lty = 2, col = "blue")
+```
+
+Q-Q plot и гистограмма:
+```{r}
+par(mfrow=c(1,2))
+qqnorm(res)
+qqline(res, col="red")
+hist(res)
+```
+
+
+# Сравниваем АРИМы
+
+Сравним остатки двух версий аримы:
+```{r}
+fitted(fit.arima.auto)
+res      <- tSeries - fitted(fit.arima.hand)
+res.auto <- tSeries - fitted(fit.arima.auto)
+
+fit.arima <- fit.arima.auto
+
+fit.arima.auto$aic
+fit.arima.hand$aic
+
+plot(c(res), c(res.auto), xlim=c(min(res, res.auto), max(res, res.auto)), ylim=c(min(res, res.auto), max(res, res.auto)), 
+     xlab = "Residuals of manually found model", ylab="Residuals of auto.arima model")
+grid()
+lines(c(min(res, res.auto), max(res, res.auto))*2, c(min(res, res.auto), max(res, res.auto))*2, col="red")
+
+dm.test(res, res.auto)
+```
+Критерий Диболда-Мариано не обнаруживает значимого различия между качеством прогнозов.
+
+АИК Автоматической - `r fit.arima.auto$aic`, ручной `r fit.arima.hand$aic`. Судя по остаткам берем автоматическую.
+
+
+```{r}
+fit.arima <- fit.arima.hand
+
+par(mfrow=c(2,1))
+
+D <- 24
+fl <- forecast(fit.arima.hand, h=D, bootstrap=TRUE)
+plot(fl, ylab=xname, xlab="Year", col="red")
+
+fl <- forecast(fit.arima, h=D, bootstrap=TRUE)
+plot(fl, ylab=xname, xlab="Year", col="red")
+```
+
+
+# ETS
+```{r}
+trainSeries <- window(tSeries, end=c(2014, 1))
+testSeries  <- window(tSeries, start=c(2014,2))
+
+fit.ets <- ets(tSeries, lambda=LambdaOpt)
+print(fit.ets)
+```
+
+Настроив выбранную модель на обучающей выборке, посчитаем её качество на тестовой:
+```{r}
+fitShort <- ets(trainSeries, model="AAA", damped=F)
+fc       <- forecast(fitShort, h=24)
+
+accuracy(fc, testSeries)
+plot(forecast(fitShort, h=D), ylab=xname, xlab="Year")
+lines(tSeries, col="red")
+```
+
+Остатки:
+```{r}
+tsdisplay(residuals(fit.ets))
+```
+
+Достигаемые уровни значимости критерия Льюнга-Бокса для них:
+```{r}
+p <- rep(0, 1, frequency(tSeries)*3)
+for (i in 1:length(p)){
+  p[i] <- Box.test(residuals(fit.ets), lag=i, type = "Ljung-Box")$p.value
+}
+plot(p, xlab="Lag", ylab="P-value", ylim=c(0,1))
+abline(h = 0.05, lty = 2, col = "blue")
+```
+
+```{r}
+res  <- tSeries - fitted(fit.arima)
+res.ets  <- tSeries - fit.ets$fitted
+```
+
+# Итоговое сравнение
+Сравним остатки лучших моделей ARIMA и ETS:
+```{r}
+plot(c(res), c(res.ets), 
+     xlab="Residuals, best ARIMA",
+     ylab="Residuals, best ETS",
+     xlim=c(min(c(res, res.ets), na.rm=T), max(c(res, res.ets), na.rm=T)),
+     ylim=c(min(c(res, res.ets), na.rm=T), max(c(res, res.ets), na.rm=T)))
+ lines(c(min(c(res, res.ets), na.rm=T), max(c(res, res.ets), na.rm=T)), c(min(c(res, res.ets), na.rm=T), max(c(res, res.ets), na.rm=T)), col="red")
+
+dm.test(res, res.ets)
+fit.arima$aic
+fit.ets$aic
+```
+
+```{r}
+D <- 24
+if (fit.arima$aic < fit.ets$aic ) {
+  fl <- forecast(fit.arima, h=D, bootstrap=TRUE)
+
+  plot(fl, ylab=xname, xlab="Year", col="red")
+} else {
+  fl <- forecast(fit.ets, h=D, bootstrap=TRUE)
+  plot(fl, ylab=xname, xlab="Year", col="red")
+}
+```
